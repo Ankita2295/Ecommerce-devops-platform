@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>E-Commerce DevOps Platform</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 1000px; margin: 40px auto; padding: 0 20px; }
+    .header { display:flex; justify-content:space-between; align-items:center; }
+    .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; }
+    .card { border:1px solid #ddd; border-radius:10px; padding:20px; }
+    .badge { background:#eee; padding:5px 10px; border-radius:20px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>CloudCart</h1>
+    <span class="badge">Version {{ version }}</span>
+  </div>
+  <p>AI-powered e-commerce DevOps demonstration platform.</p>
+  <div class="grid">
+    {% for p in products %}
+    <div class="card">
+      <h2>{{ p.name }}</h2>
+      <p>${{ "%.2f"|format(p.price) }}</p>
+      <button onclick="alert('Demo checkout for {{ p.name }}')">Buy</button>
+    </div>
+    {% endfor %}
+  </div>
+</body>
+</html>

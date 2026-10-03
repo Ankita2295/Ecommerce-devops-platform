@@ -1,0 +1,86 @@
+pipeline {
+    agent any
+
+    environment {
+        IMAGE = credentials('docker-image-name')
+        REGISTRY_CREDENTIALS = 'dockerhub-credentials'
+        K8S_NAMESPACE = 'ecommerce'
+        APP_NAME = 'ecommerce-app'
+        IMAGE_TAG = "${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps { checkout scm }
+        }
+
+        stage('Lint & Unit Test') {
+            steps {
+                sh '''
+                  python3 -m venv .ci-venv
+                  . .ci-venv/bin/activate
+                  pip install -q -r app/requirements.txt pytest
+                  python -m compileall app
+                '''
+            }
+        }
+
+        stage('Secret Scan') {
+            steps {
+                sh 'docker run --rm -v "$WORKSPACE:/repo" zricethezav/gitleaks:latest detect --source=/repo --no-banner || true'
+            }
+        }
+
+        stage('Build Image') {
+            steps {
+                sh 'docker build -t ${IMAGE}:${IMAGE_TAG} -t ${IMAGE}:latest .'
+            }
+        }
+
+        stage('Container Scan') {
+            steps {
+                sh 'docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image --severity HIGH,CRITICAL --ignore-unfixed ${IMAGE}:${IMAGE_TAG} || true'
+            }
+        }
+
+        stage('Push Image') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: "${REGISTRY_CREDENTIALS}",
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh '''
+                      echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                      docker push ${IMAGE}:${IMAGE_TAG}
+                      docker push ${IMAGE}:latest
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            when { expression { return env.DEPLOY_TO_K8S == 'true' } }
+            steps {
+                sh '''
+                  kubectl -n ${K8S_NAMESPACE} set image deployment/${APP_NAME}                     ecommerce=${IMAGE}:${IMAGE_TAG}
+                  kubectl -n ${K8S_NAMESPACE} rollout status deployment/${APP_NAME} --timeout=180s
+                '''
+            }
+        }
+
+        stage('Smoke Test') {
+            when { expression { return env.DEPLOY_TO_K8S == 'true' } }
+            steps {
+                sh 'kubectl -n ${K8S_NAMESPACE} get pods -o wide'
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker logout || true'
+            deleteDir()
+        }
+    }
+}

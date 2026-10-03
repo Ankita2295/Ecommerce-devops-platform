@@ -1,0 +1,24 @@
+replicaCount: 3
+
+image:
+  repository: YOUR_DOCKERHUB_USER/ecommerce-devops-platform
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+ingress:
+  enabled: true
+  className: nginx
+  host: ecommerce.local
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
