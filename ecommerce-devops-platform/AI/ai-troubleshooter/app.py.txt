@@ -1,0 +1,127 @@
+import os
+import json
+from datetime import datetime
+from typing import Optional
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from openai import OpenAI
+
+app = FastAPI(
+    title="E-Commerce AI DevOps Troubleshooter",
+    version="1.0.0"
+)
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+PROMPT_FILE = os.path.join(
+    os.path.dirname(__file__),
+    "prompts",
+    "incident_prompt.txt"
+)
+
+
+class IncidentRequest(BaseModel):
+    service: str
+    namespace: str = "default"
+    logs: str = ""
+    pod_status: str = ""
+    metrics: str = ""
+    events: str = ""
+    deployment: str = ""
+
+
+class HealthResponse(BaseModel):
+    status: str
+
+
+@app.get("/", response_model=HealthResponse)
+def root():
+    return {"status": "AI DevOps Troubleshooter is running"}
+
+
+@app.get("/health", response_model=HealthResponse)
+def health():
+    return {"status": "healthy"}
+
+
+def load_prompt():
+    with open(PROMPT_FILE, "r", encoding="utf-8") as file:
+        return file.read()
+
+
+@app.post("/analyze")
+def analyze_incident(request: IncidentRequest):
+
+    if not os.getenv("OPENAI_API_KEY"):
+        raise HTTPException(
+            status_code=500,
+            detail="OPENAI_API_KEY is not configured"
+        )
+
+    system_prompt = load_prompt()
+
+    incident_data = {
+        "service": request.service,
+        "namespace": request.namespace,
+        "logs": request.logs,
+        "pod_status": request.pod_status,
+        "metrics": request.metrics,
+        "events": request.events,
+        "deployment": request.deployment
+    }
+
+    user_prompt = f"""
+Analyze the following Kubernetes DevOps incident.
+
+INCIDENT DATA:
+{json.dumps(incident_data, indent=2)}
+
+Return the response as JSON with these fields:
+
+severity
+problem
+root_cause
+evidence
+recommendations
+verification_steps
+rollback_required
+confidence
+summary
+"""
+
+    try:
+        response = client.chat.completions.create(
+            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            temperature=0.1,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": system_prompt
+                },
+                {
+                    "role": "user",
+                    "content": user_prompt
+                }
+            ]
+        )
+
+        result = json.loads(
+            response.choices[0].message.content
+        )
+
+        result["incident_id"] = (
+            f"INC-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        )
+
+        result["service"] = request.service
+        result["namespace"] = request.namespace
+
+        return result
+
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"AI analysis failed: {str(error)}"
+        )
